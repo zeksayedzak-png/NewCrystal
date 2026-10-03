@@ -1,14 +1,14 @@
--- ReplicatedStorage Rune Model Scanner & Distance Tracker
+-- DroppedRunes Real-time Scanner & Distance Tracker
 local Players = game:GetService("Players")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
--- تحديد المجلد المستهدف داخل ReplicatedStorage
-local targetFolder = ReplicatedStorage:WaitForChild("RuneModels")
+-- تحديد المجلد المستهدف داخل Workspace
+local droppedRunesFolder = Workspace:WaitForChild("DroppedRunes")
 
 -- متغيرات التحكم
 local isScannerActive = false
@@ -97,48 +97,38 @@ UserInputService.InputEnded:Connect(function(input)
     end
 end)
 
--- 3. دالة تحديد موقع الجزء الفعلي المرتبط بـ RuneBillboard
-local function getTargetPart(obj)
-    if obj:IsA("BasePart") then return obj end
-    
-    -- إذا كان BillboardGui وله Adornee
-    if obj:IsA("BillboardGui") and obj.Adornee then
-        return obj.Adornee
+-- 3. دالة العثور على الجزء الفعلي (BasePart) لرسم العلامة عليه
+local function getRuneBasePart(item)
+    if item:IsA("BasePart") then
+        return item
+    elseif item:IsA("Model") then
+        return item.PrimaryPart or item:FindFirstChildWhichIsA("BasePart", true)
     end
-
-    -- البحث عن أول BasePart داخله أو عند الأب
-    local foundPart = obj:FindFirstChildWhichIsA("BasePart", true)
-    if foundPart then return foundPart end
-
-    if obj.Parent and obj.Parent:IsA("BasePart") then
-        return obj.Parent
-    end
-
-    return nil
+    return item:FindFirstChildWhichIsA("BasePart", true)
 end
 
 -- 4. تطبيق العلامة وحساب المسافة
-local function applyRuneTrack(target)
-    if not target or trackedRunes[target] then return end
+local function applyRuneTrack(runeItem)
+    if not runeItem or trackedRunes[runeItem] then return end
 
-    local adornPart = getTargetPart(target)
-    if not adornPart then return end
+    local part = getRuneBasePart(runeItem)
+    if not part then return end
 
     -- إضاءة Highlight على المجسم
     local highlight = Instance.new("Highlight")
-    highlight.Adornee = adornPart
+    highlight.Adornee = runeItem:IsA("Model") and runeItem or part
     highlight.FillColor = Color3.fromRGB(0, 255, 150)
     highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
     highlight.FillTransparency = 0.4
-    highlight.Parent = adornPart
+    highlight.Parent = part
 
-    -- لوحة إشارة مع المسافة فوق الكائن
+    -- لوحة إشارة تظهر اسم الرون والمسافة فوقه مباشرة
     local billboard = Instance.new("BillboardGui")
-    billboard.Adornee = adornPart
+    billboard.Adornee = part
     billboard.Size = UDim2.new(0, 140, 0, 30)
     billboard.StudsOffset = Vector3.new(0, 3, 0)
     billboard.AlwaysOnTop = true
-    billboard.Parent = adornPart
+    billboard.Parent = part
 
     local textLabel = Instance.new("TextLabel")
     textLabel.Size = UDim2.new(1, 0, 1, 0)
@@ -147,48 +137,46 @@ local function applyRuneTrack(target)
     textLabel.TextStrokeTransparency = 0
     textLabel.TextSize = 12
     textLabel.Font = Enum.Font.GothamBold
-    textLabel.Text = "Rune [0m]"
+    textLabel.Text = runeItem.Name .. " [0m]"
     textLabel.Parent = billboard
 
-    trackedRunes[target] = {
-        Part = adornPart,
+    trackedRunes[runeItem] = {
+        Part = part,
         Highlight = highlight,
         Billboard = billboard,
         Label = textLabel
     }
 end
 
--- 5. تنظيف جميع العلامات
+-- 5. إزالة كل العلامات عند الإيقاف
 local function clearAllTracks()
-    for target, data in pairs(trackedRunes) do
+    for item, data in pairs(trackedRunes) do
         if data.Highlight then data.Highlight:Destroy() end
         if data.Billboard then data.Billboard:Destroy() end
     end
     trackedRunes = {}
 end
 
--- 6. فحص ReplicatedStorage.RuneModels فقط
-local function scanReplicatedStorage()
-    for _, desc in pairs(targetFolder:GetDescendants()) do
-        if desc.Name == "RuneBillboard" then
-            applyRuneTrack(desc)
-        end
+-- 6. مسح مجلد DroppedRunes بالكامل
+local function scanDroppedRunes()
+    for _, child in pairs(droppedRunesFolder:GetChildren()) do
+        applyRuneTrack(child)
     end
 end
 
--- 7. بدء المراقبة المستمرة داخل ReplicatedStorage
+-- 7. بدء التشغيل والمراقبة الحية
 local function startScanning()
-    scanReplicatedStorage()
+    scanDroppedRunes()
 
-    -- مراقبة ظهور RuneBillboard جديد داخل ReplicatedStorage.RuneModels فوراً أثناء تحركك
-    addedConnection = targetFolder.DescendantAdded:Connect(function(desc)
-        if isScannerActive and desc.Name == "RuneBillboard" then
+    -- مراقبة ظهور أي Rune جديد يرسبن في المجلد أثناء تحركك
+    addedConnection = droppedRunesFolder.ChildAdded:Connect(function(child)
+        if isScannerActive then
             task.wait(0.1)
-            applyRuneTrack(desc)
+            applyRuneTrack(child)
         end
     end)
 
-    -- تحديث مسافة اقترابك منه باستمرار [Xm]
+    -- تحديث مسافة الاقتراب باستمرار [Xm]
     globalConnection = RunService.Heartbeat:Connect(function()
         if not isScannerActive then return end
 
@@ -196,14 +184,14 @@ local function startScanning()
         local root = char and char:FindFirstChild("HumanoidRootPart")
         if not root then return end
 
-        for target, data in pairs(trackedRunes) do
-            if target and target.Parent and data.Part and data.Part.Parent then
+        for item, data in pairs(trackedRunes) do
+            if item and item.Parent and data.Part and data.Part.Parent then
                 local dist = math.floor((root.Position - data.Part.Position).Magnitude)
-                data.Label.Text = "Rune [" .. tostring(dist) .. "m]"
+                data.Label.Text = item.Name .. " [" .. tostring(dist) .. "m]"
             else
                 if data.Highlight then data.Highlight:Destroy() end
                 if data.Billboard then data.Billboard:Destroy() end
-                trackedRunes[target] = nil
+                trackedRunes[item] = nil
             end
         end
     end)
@@ -215,7 +203,7 @@ local function stopScanning()
     clearAllTracks()
 end
 
--- 8. زر On/Off
+-- 8. زر التشغيل والإيقاف On/Off
 ToggleBtn.MouseButton1Click:Connect(function()
     isScannerActive = not isScannerActive
 
